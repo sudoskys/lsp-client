@@ -19,7 +19,14 @@ from .error import ServerRuntimeError
 
 
 class EnsureInstalledProtocol(Protocol):
-    async def __call__(self) -> None: ...
+    async def __call__(self) -> str | None:
+        """Install the server binary and return its resolved absolute path.
+
+        Returns:
+            Absolute path to the installed binary, or None if the binary
+            should be discoverable via the standard PATH.
+        """
+        ...
 
 
 @define
@@ -93,19 +100,23 @@ class LocalServer(StreamServer):
 
     @asynccontextmanager
     async def run_process(self, workspace: Workspace) -> AsyncGenerator[None]:
+        program = self.program
         try:
             await self.check_availability()
         except ServerRuntimeError as e:
             if disable_auto_installation():
                 raise ServerRuntimeError(self, "auto-installation is disabled.") from e
             elif self.ensure_installed:
-                await self.ensure_installed()
+                resolved = await self.ensure_installed()
+                if resolved:
+                    program = resolved
+                    logger.info("Using resolved binary path: {}", program)
             else:
                 raise ServerRuntimeError(
                     self, "no installation method is provided."
                 ) from e
 
-        command = [self.program, *self.args]
+        command = [program, *self.args]
         logger.debug("Running with command: {}", command)
 
         try:

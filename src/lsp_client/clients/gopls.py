@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 from functools import partial
+from pathlib import Path
 from subprocess import CalledProcessError
 from typing import Any, override
 
@@ -47,9 +48,9 @@ from lsp_client.utils.types import lsp_type
 GoplsContainerServer = partial(ContainerServer, image="ghcr.io/lsp-client/gopls:latest")
 
 
-async def ensure_gopls_installed() -> None:
-    if shutil.which("gopls"):
-        return
+async def ensure_gopls_installed() -> str | None:
+    if path := shutil.which("gopls"):
+        return path
 
     logger.warning("gopls not found, attempting to install via go install...")
 
@@ -61,8 +62,23 @@ async def ensure_gopls_installed() -> None:
             "Could not install gopls. Please install it manually with 'go install golang.org/x/tools/gopls@latest'. "
             "See https://github.com/golang/tools/tree/master/gopls for more information."
         ) from e
-    else:
-        return
+
+    # go install places binaries in $GOPATH/bin; resolve the actual path
+    # since the daemon process may not have it in PATH.
+    if path := shutil.which("gopls"):
+        return path
+
+    try:
+        result = await anyio.run_process(["go", "env", "GOPATH"])
+        gopath = result.stdout.decode().strip()
+        candidate = Path(gopath) / "bin" / "gopls"
+        if candidate.is_file():
+            logger.info("Resolved gopls at {}", candidate)
+            return str(candidate)
+    except (CalledProcessError, OSError):
+        pass
+
+    return None
 
 
 GoplsLocalServer = partial(
